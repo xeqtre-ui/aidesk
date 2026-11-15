@@ -1,77 +1,108 @@
-# aidesk — Masaüstü AI Asistanı
+﻿# aidesk — Windows Desktop AI Assistant
 
-Fare neredeyse orada açılan küçük, yuvarlak bir menüyle çalışan; **kendi API
-anahtarınızla** (Gemini / Claude / GPT) bilgisayarınızı kontrol eden ve **sesli
-komut** alan bir Windows asistanı.
+A Windows assistant with a radial menu that opens at your cursor. Control desktop
+apps, manage music in the background, and use typed or voice commands with your
+own Gemini, Claude, or OpenAI API key.
 
-## Kullanıcılar için (terminal gerekmez)
+The application interface and assistant responses are currently in Turkish.
 
-1. `aidesk-windows.zip` dosyasını indirip istediğiniz bir klasöre çıkarın
-   (OneDrive klasörü **olmasın**, ör. `C:\Programlar\aidesk`).
-2. `aidesk\aidesk.exe`'ye çift tıklayın.
-3. İlk açılışta **Ayarlar** penceresi gelir: sağlayıcınızı seçip API anahtarınızı
-   yapıştırın, **Kaydet**.
-4. Uygulama sağ alttaki tepside çalışır.
-   - **Ctrl+Space** → fare imlecinin olduğu yerde yuvarlak menü açılır.
-   - **Ctrl+Shift+Space** → doğrudan sesli komut.
-   - Tepsi ikonuna tıklamak da menüyü açar.
+## Getting started
 
-> İpucu: Masaüstü kısayolu için `aidesk.exe`'ye sağ tıklayın → *Gönder* →
-> *Masaüstü (kısayol oluştur)*. Windows ile başlaması için kısayolu
-> `Win+R` → `shell:startup` klasörüne kopyalayın.
+If you have a packaged `aidesk-windows.zip` build:
 
-### Menü
+1. Extract it to a local folder outside OneDrive, such as `C:\Apps\aidesk`.
+2. Double-click `aidesk\aidesk.exe`.
+3. In the first-run settings dialog (`Ayarlar`), select a provider, enter your API
+   key, and click Save (`Kaydet`).
+4. The app runs in the Windows system tray.
 
-| Dilim | Ne yapar |
-|---|---|
-| ✍️ Komut yaz / ortadaki ✦ | Küçük bir yazı kutusu açar |
-| 🎤 Sesli komut | Konuşun; susunca veya baloncuğa tıklayınca biter |
-| ⏯️ ⏭️ ⏮️ | Spotify / Apple Music / tarayıcıyı **arka planda** kontrol eder |
-| 🎵 Ne çalıyor? | Çalan şarkıyı söyler |
-| 📷 Ekran görüntüsü | Ekranı kaydeder |
-| ⚙️ Ayarlar | API anahtarları, kısayollar, ses modeli |
+| Shortcut | Action |
+| --- | --- |
+| **Ctrl+Space** | Open the radial menu at the cursor |
+| **Ctrl+Shift+Space** | Start a voice command |
+| **Click the tray icon** | Open the menu |
 
-### Sesli komut çalışmıyorsa
+To create a desktop shortcut, right-click `aidesk.exe` and select **Send to →
+Desktop (create shortcut)**. To launch at sign-in, copy the shortcut into the
+folder opened by **Win+R → `shell:startup`**.
 
-- **Ayarlar → Gizlilik ve güvenlik → Mikrofon → "Masaüstü uygulamalarının
-  mikrofona erişmesine izin ver"** açık olmalı.
-- **Ayarlar → Sistem → Ses → Giriş** altında doğru mikrofonun seçili ve ses
-  seviyesinin yüksek olduğundan emin olun.
-- İlk sesli komutta ses modeli (~460 MB) bir kez indirilir.
+## Menu features
 
-### Kayıtlar
+| Menu item | Action |
+| --- | --- |
+| Type a command / center symbol | Open a small command input |
+| Voice command | Record until silence is detected or you click the bubble |
+| Play/pause, next, previous | Control Spotify, Apple Music, or browser media in the background |
+| Now playing | Show the current track |
+| Screenshot | Save a screenshot locally |
+| Settings | Configure API keys, shortcuts, and speech recognition |
 
-Ayarlar ve hata kaydı: `%APPDATA%\aidesk\` (`aidesk.log`). API anahtarları bu
-bilgisayara özgü şekilde şifrelenerek saklanır.
+## Voice troubleshooting
 
----
+- In Windows **Settings → Privacy & security → Microphone**, allow desktop apps
+  to access the microphone.
+- In **Settings → System → Sound → Input**, select the correct microphone and
+  check its input level.
+- Local recognition downloads a Whisper model on first use. Download size varies
+  with the selected model.
+- Speech recognition supports cloud and local modes. In automatic mode, an
+  available Gemini or OpenAI key can enable cloud transcription.
 
-## Geliştiriciler için
+## Privacy and security
+
+- Settings, encrypted API keys, logs, and saved screenshots are stored under
+  `%APPDATA%\aidesk\`. Do not upload this directory or share its contents without
+  reviewing them.
+- API keys are encrypted at rest using a key derived from machine and user
+  information. This protects against casual plaintext exposure; it does not
+  provide strong protection against someone who can access those files and
+  reproduce the machine and user information.
+- AI requests send conversation text and tool results to the selected provider.
+  File contents and clipboard text returned by tools can therefore leave your
+  computer. Cloud speech recognition also sends recorded audio to its provider.
+- Recognized voice commands and some command details are written to local logs.
+- Keep confirmation for high-risk actions enabled. Shell commands, keyboard and
+  mouse input, and process termination can affect your files and applications.
+  File and clipboard reads currently do not require confirmation. Opening apps
+  or paths also does not require confirmation and can launch executable content.
+- The assistant currently allows high-risk tool execution when no confirmation
+  callback is installed. The desktop UI installs a callback; other integrations
+  must account for this behavior.
+- The app can execute code with the permissions of the account running it.
+
+## Development
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python -m aidesk            # kaynaktan çalıştır
-.\build.ps1                 # dist\aidesk\aidesk.exe + dist\aidesk-windows.zip
-dist\aidesk\aidesk.exe --selftest   # paketlenmiş uygulamayı test et
+python -m aidesk
 ```
 
-### Mimari
+Build and check the Windows package:
 
+```powershell
+.\build.ps1
+dist\aidesk\aidesk.exe --selftest
 ```
+
+The build script creates `dist\aidesk\aidesk.exe` and
+`dist\aidesk-windows.zip`. Self-test results are written to
+`%APPDATA%\aidesk\selftest.txt`.
+
+## Architecture
+
+```text
 aidesk/
-├── main.py        # giriş noktası, tek kopya, global kısayol, öz-test
-├── ui.py          # yuvarlak menü, yazı kutusu, baloncuk, denetleyici, tepsi
-├── assistant.py   # araç kullanan AI döngüsü + onay akışı
-├── config.py      # ayarlar + şifreli API anahtarları
-├── voice.py       # yerel konuşma tanıma (faster-whisper)
-├── logsetup.py    # hata kaydı (çökme yerine log)
-├── providers/     # Gemini (google-genai), Claude, GPT
-└── tools/         # uygulama, medya (Windows SMTC), sistem, dosya araçları
+├── main.py        # Entry point, single instance, global shortcuts, self-test
+├── ui.py          # Radial menu, command input, bubbles, controller, system tray
+├── assistant.py   # AI tool loop and confirmation flow
+├── config.py      # Settings and encrypted API key storage
+├── voice.py       # Cloud transcription and local faster-whisper recognition
+├── logsetup.py    # Rotating logs and exception handling
+├── providers/     # Gemini (google-genai), Claude, and OpenAI adapters
+└── tools/         # Apps, Windows SMTC media, system, and file tools
 ```
 
-- Riskli araçlar (kabuk komutu, tıklama, yazma, süreç kapatma) çalışmadan önce
-  onay penceresi açar.
-- Gemini modeli emekliye ayrılırsa veya yanıt vermezse uygulama erişilebilen
-  başka bir "flash" modele otomatik geçer.
+The Gemini adapter can fall back to another available Flash model when a model
+is unavailable or rate-limited.

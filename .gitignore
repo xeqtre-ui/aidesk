@@ -15,3 +15,13 @@ radial_preview.png
 backups/
 *-backup.txt
 ui-update-review.diff
+
+# Runtime data and private key files
+secrets.enc
+salt.bin
+aidesk.log*
+last_screenshot.png
+*.pem
+*.key
+*.p12
+*.pfx
