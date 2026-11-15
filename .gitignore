@@ -1,0 +1,17 @@
+.venv/
+build/
+dist/
+__pycache__/
+*.pyc
+*.spec
+build.log
+radial_preview.png
+
+# Local caches, credentials, and development backups
+.cache/
+.env
+.env.*
+!.env.example
+backups/
+*-backup.txt
+ui-update-review.diff

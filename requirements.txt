@@ -1,0 +1,27 @@
+# === AI sağlayıcıları ===
+anthropic>=0.40.0
+openai>=1.50.0
+google-genai>=1.0.0
+
+# === Arayüz (yuvarlak menü + tepsi) ===
+PyQt6>=6.7.0
+
+# === Global kısayol ===
+keyboard>=0.13.5
+
+# === Sistem / bilgisayar kontrolü ===
+pyautogui>=0.9.54
+psutil>=6.0.0
+pygetwindow>=0.0.9
+pyperclip>=1.9.0
+
+# === Windows medya kontrolü (Spotify/Apple Music arka planda) ===
+winsdk>=1.0.0b10
+
+# === Sesli komut (yerel, çevrimdışı) ===
+sounddevice>=0.4.7
+numpy>=1.26.0
+faster-whisper>=1.0.0
+
+# === Güvenli API anahtarı depolama ===
+cryptography>=43.0.0
