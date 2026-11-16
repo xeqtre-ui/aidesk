@@ -23,5 +23,15 @@ sounddevice>=0.4.7
 numpy>=1.26.0
 faster-whisper>=1.0.0
 
+# === Sesli uyandırma ("Hey Jarvis") ===
+# openwakeword'ü --no-deps ile kurun (build.ps1 bunu yapar):
+#   pip install --no-deps openwakeword
+# Tanıma için gereken çalışma zamanı bağımlılıkları:
+tqdm>=4.0
+requests>=2.0
+
+# === Spotify'da belirli şarkı çalma (Windows UI Automation) ===
+uiautomation>=2.0.20
+
 # === Güvenli API anahtarı depolama ===
 cryptography>=43.0.0

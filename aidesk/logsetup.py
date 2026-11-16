@@ -1,7 +1,7 @@
-"""Hata kaydı — çökmeleri %APPDATA%\\aidesk\\aidesk.log dosyasına yazar.
+"""Error logging — writes crashes to %APPDATA%\\aidesk\\aidesk.log.
 
-PyQt6, yakalanmamış bir istisnada uygulamayı anında kapatır. Kendi
-excepthook'umuzu kurunca hata loglanır ve uygulama çalışmaya devam eder.
+PyQt6 closes the app instantly on an uncaught exception. By installing our own
+excepthook, the error is logged and the app keeps running.
 """
 from __future__ import annotations
 
@@ -22,15 +22,15 @@ def setup_logging() -> None:
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.addHandler(handler)
-    if sys.stderr is not None:  # .exe (windowed) modunda stderr yoktur
+    if sys.stderr is not None:  # in .exe (windowed) mode there is no stderr
         root.addHandler(logging.StreamHandler())
 
     def _hook(exc_type, exc, tb):
-        log.error("Yakalanmamış hata", exc_info=(exc_type, exc, tb))
+        log.error("Uncaught error", exc_info=(exc_type, exc, tb))
 
     def _thread_hook(args):
-        log.error("İş parçacığında hata", exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+        log.error("Error in thread", exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
 
     sys.excepthook = _hook
     threading.excepthook = _thread_hook
-    log.info("aidesk başlatıldı")
+    log.info("aidesk started")

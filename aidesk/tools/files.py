@@ -1,4 +1,4 @@
-"""Dosya araçları — açma, arama, okuma."""
+"""File tools — opening, searching, reading."""
 from __future__ import annotations
 
 import os
@@ -6,6 +6,8 @@ from pathlib import Path
 
 from . import Risk, tool
 
+# Turkish folder names (Masaüstü, Belgeler, İndirilenler) are kept: on Turkish
+# Windows these are the real localized folder names to search.
 _SEARCH_ROOTS = [
     Path.home() / "Desktop",
     Path.home() / "Masaüstü",
@@ -19,12 +21,12 @@ _SEARCH_ROOTS = [
 @tool(
     name="open_path",
     description=(
-        "Bir dosya veya klasörü varsayılan uygulamasıyla açar. Tam yol verin."
+        "Opens a file or folder with its default app. Provide the full path."
     ),
     parameters={
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Açılacak dosya/klasör yolu."}
+            "path": {"type": "string", "description": "Path of the file/folder to open."}
         },
         "required": ["path"],
     },
@@ -33,7 +35,7 @@ _SEARCH_ROOTS = [
 def open_path(path: str) -> str:
     p = Path(os.path.expandvars(os.path.expanduser(path)))
     if not p.exists():
-        return f"Bulunamadı: {p}"
+        return f"Not found: {p}"
     try:
         if os.name == "nt":
             os.startfile(str(p))  # type: ignore[attr-defined]
@@ -41,27 +43,27 @@ def open_path(path: str) -> str:
             import subprocess
 
             subprocess.Popen(["xdg-open", str(p)])
-        return f"Açıldı: {p}"
+        return f"Opened: {p}"
     except Exception as e:  # noqa: BLE001
-        return f"Açılamadı: {e}"
+        return f"Could not open: {e}"
 
 
 @tool(
     name="search_files",
     description=(
-        "Masaüstü, Belgeler ve İndirilenler klasörlerinde dosya adına göre "
-        "arama yapar. Açmak istenen dosyanın yolunu bulmak için kullanın."
+        "Searches by file name in the Desktop, Documents and Downloads folders. "
+        "Use it to find the path of a file you want to open."
     ),
     parameters={
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Dosya adında aranacak metin.",
+                "description": "Text to look for in the file name.",
             },
             "limit": {
                 "type": "integer",
-                "description": "Dönecek en fazla sonuç (varsayılan 15).",
+                "description": "Maximum results to return (default 15).",
             },
         },
         "required": ["query"],
@@ -75,26 +77,26 @@ def search_files(query: str, limit: int = 15) -> str:
         if not root.exists():
             continue
         for dirpath, _dirs, filenames in os.walk(root):
-            # Çok derine inme.
+            # Don't go too deep.
             if dirpath.count(os.sep) - str(root).count(os.sep) > 4:
                 continue
             for fn in filenames:
                 if q in fn.lower():
                     hits.append(str(Path(dirpath) / fn))
                     if len(hits) >= limit:
-                        return "Bulunanlar:\n- " + "\n- ".join(hits)
+                        return "Found:\n- " + "\n- ".join(hits)
     if not hits:
-        return f"'{query}' ile eşleşen dosya bulunamadı."
-    return "Bulunanlar:\n- " + "\n- ".join(hits)
+        return f"No file matching '{query}' found."
+    return "Found:\n- " + "\n- ".join(hits)
 
 
 @tool(
     name="read_text_file",
-    description="Bir metin dosyasının içeriğini okur (ilk 8000 karakter).",
+    description="Reads the contents of a text file (first 8000 characters).",
     parameters={
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Okunacak dosyanın yolu."}
+            "path": {"type": "string", "description": "Path of the file to read."}
         },
         "required": ["path"],
     },
@@ -103,8 +105,8 @@ def search_files(query: str, limit: int = 15) -> str:
 def read_text_file(path: str) -> str:
     p = Path(os.path.expandvars(os.path.expanduser(path)))
     if not p.exists() or not p.is_file():
-        return f"Dosya bulunamadı: {p}"
+        return f"File not found: {p}"
     try:
         return p.read_text("utf-8", errors="replace")[:8000]
     except Exception as e:  # noqa: BLE001
-        return f"Okunamadı: {e}"
+        return f"Could not read: {e}"

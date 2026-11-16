@@ -1,8 +1,11 @@
-"""API hata yönetimi: kota (429) bekleme listesi ve anlaşılır Türkçe mesajlar.
+"""API error handling: a quota (429) cooldown list and readable Turkish messages.
 
-Gemini ücretsiz katmanında kota MODEL BAŞINA ayrıdır (ör. günde 20 istek).
-Bir model kotayı doldurunca onu sıfırlanana kadar atlayıp diğerine geçeriz;
-kütüphanenin dakikalarca bekleyip yeniden denemesine izin vermeyiz.
+On the Gemini free tier the quota is PER MODEL (e.g. 20 requests a day).
+When a model hits its quota we skip it until it resets and move to another;
+we don't let the library wait for minutes and retry.
+
+Note: user-facing messages returned by humanize() are kept in Turkish on purpose,
+because they are shown to the user and spoken aloud by Jarvis (Turkish voice).
 """
 from __future__ import annotations
 
@@ -11,16 +14,48 @@ import threading
 import time
 
 _lock = threading.Lock()
-_cooldown: dict[str, float] = {}   # model -> bu zamana kadar kullanma
+_cooldown: dict[str, float] = {}   # model -> don't use until this time
+_loaded = False
+
+
+def _file():
+    from .config import CONFIG_DIR
+
+    return CONFIG_DIR / "cooldown.json"
+
+
+def _load() -> None:
+    """When the app restarts, remember quota-exhausted/busy models (avoid pointless waiting)."""
+    global _loaded
+    if _loaded:
+        return
+    _loaded = True
+    try:
+        import json
+
+        now = time.time()
+        data = json.loads(_file().read_text("utf-8"))
+        _cooldown.update({k: float(v) for k, v in data.items() if float(v) > now})
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def cool(model: str, seconds: float) -> None:
+    import json
+
     with _lock:
+        _load()
         _cooldown[model] = time.time() + seconds
+        now = time.time()
+        try:
+            _file().write_text(json.dumps({k: v for k, v in _cooldown.items() if v > now}), "utf-8")
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def is_cooling(model: str) -> bool:
     with _lock:
+        _load()
         return _cooldown.get(model, 0) > time.time()
 
 
@@ -38,10 +73,22 @@ def status_code(e: Exception) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def is_quota_error(e: Exception) -> bool:
+    """Is this a quota / credit / rate-limit error? (worth switching to another provider)"""
+    low = str(e).lower()
+    return status_code(e) == 429 or any(k in low for k in (
+        "resource_exhausted", "no credits", "insufficient_quota", "rate limit", "credit balance",
+        "no usable gemini model"))
+
+
 def humanize(e: Exception) -> str:
-    """Ham API hatasını kullanıcıya gösterilecek kısa Türkçe cümleye çevirir."""
+    """Turns a raw API error into a short Turkish sentence to show the user."""
     code = status_code(e)
     text = str(e)
+    low = text.lower()
+    if "no credits" in low or "insufficient_quota" in low or "credit balance is too low" in low:
+        return ("Seçili yapay zekâ hesabında API kredisi yok. Sağlayıcının sitesinde Billing "
+                "bölümünden kredi yükle (ChatGPT/Claude aboneliği API kredisi içermez).")
     if code == 429 or "RESOURCE_EXHAUSTED" in text or "rate limit" in text.lower():
         hours = retry_delay(e, 0) / 3600
         when = f" (yaklaşık {hours:.0f} saat sonra sıfırlanır)" if hours >= 1 else ""
@@ -56,6 +103,6 @@ def humanize(e: Exception) -> str:
     low = text.lower()
     if any(k in low for k in ("connect", "timeout", "timed out", "getaddrinfo", "network")):
         return "İnternet bağlantısı yok ya da çok yavaş."
-    if "API anahtarı bulunamadı" in text:
+    if "No API key found" in text:
         return text
     return f"Bir hata oluştu: {text[:160]}"

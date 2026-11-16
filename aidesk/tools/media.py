@@ -1,11 +1,11 @@
-"""Medya kontrolü — Spotify, Apple Music, tarayıcı vb. ARKA PLANDA.
+"""Media control — Spotify, Apple Music, browser etc. IN THE BACKGROUND.
 
-Windows System Media Transport Controls (SMTC) kullanır: uygulamayı öne
-getirmeden oynat/duraklat/sonraki/önceki ve "şu an ne çalıyor".
+Uses the Windows System Media Transport Controls (SMTC): play/pause/next/previous
+and "what's playing now" without bringing the app to the front.
 
-`play_music` kapalı bir müzik uygulamasını pencere açmadan (simge durumunda)
-başlatır, medya oturumunun hazır olmasını bekler ve en son çalınan şarkıyı
-kaldığı yerden oynatır.
+`play_music` starts a closed music app without opening a window (minimized),
+waits for the media session to be ready and plays the last-played song from
+where it left off.
 """
 from __future__ import annotations
 
@@ -20,13 +20,13 @@ from . import Risk, tool
 
 log = logging.getLogger("aidesk.media")
 
-# Uygulama -> SMTC kimliğinde aranacak parçalar
+# App -> substrings to look for in the SMTC id
 APP_KEYS = {
     "spotify": ("spotify",),
     "apple music": ("applemusic", "apple music", "itunes"),
 }
 MUSIC_KEYS = tuple(k for keys in APP_KEYS.values() for k in keys)
-STATUS = {0: "kapalı", 1: "açık", 2: "değişiyor", 3: "durduruldu", 4: "oynatılıyor", 5: "duraklatıldı"}
+STATUS = {0: "closed", 1: "opened", 2: "changing", 3: "stopped", 4: "playing", 5: "paused"}
 PLAYING = 4
 
 
@@ -61,8 +61,8 @@ def _status(session) -> int:
 
 
 def _find(mgr, app: str | None):
-    """İstenen uygulamanın oturumu; uygulama verilmezse en mantıklı oturum:
-    çalan müzik uygulaması > çalan herhangi biri > müzik uygulaması > mevcut oturum."""
+    """The session of the requested app; if no app is given, the most sensible session:
+    a playing music app > any playing one > a music app > the current session."""
     sessions = list(mgr.get_sessions())
     if app:
         keys = APP_KEYS.get(app, (app,))
@@ -96,11 +96,11 @@ def _app_label(session) -> str:
         return "Spotify"
     if any(k in aid for k in APP_KEYS["apple music"]):
         return "Apple Music"
-    return session.source_app_user_model_id or "bilinmeyen uygulama"
+    return session.source_app_user_model_id or "unknown app"
 
 
 # ---------------------------------------------------------------------------
-# Arka planda başlatma
+# Launching in the background
 # ---------------------------------------------------------------------------
 def _is_running(exe_name: str) -> bool:
     import psutil
@@ -110,7 +110,7 @@ def _is_running(exe_name: str) -> bool:
 
 
 def _minimize_windows_of(exe_name: str, seconds: float, keep_foreground: int | None) -> None:
-    """Uygulamanın açılan pencerelerini (odak çalmadan) simge durumuna küçültür."""
+    """Minimizes the app's opened windows (without stealing focus)."""
     if os.name != "nt":
         return
     import ctypes
@@ -152,7 +152,7 @@ def _launch_in_background(app: str) -> str:
         exe = Path(os.environ.get("APPDATA", "")) / "Spotify" / "Spotify.exe"
         if exe.exists():
             subprocess.Popen([str(exe), "--minimized"], close_fds=True)
-        else:  # Microsoft Store sürümü
+        else:  # Microsoft Store version
             os.startfile("spotify:")  # type: ignore[attr-defined]
         _minimize_windows_of("Spotify.exe", 6.0, fg)
         return "Spotify"
@@ -160,7 +160,7 @@ def _launch_in_background(app: str) -> str:
         subprocess.Popen(["explorer.exe", r"shell:AppsFolder\AppleInc.AppleMusicWin_nzyj5cx40ttqa!App"])
         _minimize_windows_of("AppleMusic.exe", 6.0, fg)
         return "Apple Music"
-    raise ValueError(f"Desteklenmeyen uygulama: {app}")
+    raise ValueError(f"Unsupported app: {app}")
 
 
 def _press_media_play() -> None:
@@ -173,20 +173,20 @@ def _press_media_play() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Araçlar
+# Tools
 # ---------------------------------------------------------------------------
 @tool(
     name="play_music",
     description=(
-        "Müzik uygulamasında EN SON dinlenen şarkıyı kaldığı yerden çalar. Uygulama "
-        "kapalıysa pencere açmadan arka planda başlatır. 'son dinlediğim şarkıyı aç', "
-        "'müziği aç/başlat', 'spotify'ı aç' gibi isteklerde TEK BAŞINA bunu kullan. "
-        "app: 'spotify' veya 'apple music' (belirtilmezse spotify)."
+        "Plays the LAST-played song in the music app from where it left off. If the app "
+        "is closed, starts it in the background without opening a window. Use this ON ITS OWN "
+        "for requests like 'play the last song I listened to', 'open/start the music', 'open Spotify'. "
+        "app: 'spotify' or 'apple music' (spotify if unspecified)."
     ),
     parameters={
         "type": "object",
         "properties": {
-            "app": {"type": "string", "enum": ["spotify", "apple music"], "description": "Müzik uygulaması."}
+            "app": {"type": "string", "enum": ["spotify", "apple music"], "description": "Music app."}
         },
     },
     risk=Risk.MEDIUM,
@@ -211,20 +211,20 @@ def play_music(app: str = "spotify") -> str:
         label = "Spotify" if app == "spotify" else "Apple Music"
         if session is None:
             if not _is_running(exe):
-                log.info("%s arka planda başlatılıyor", label)
+                log.info("Starting %s in the background", label)
                 await asyncio.to_thread(_launch_in_background, app)
             session = await _wait_session(15.0)
         if session is None:
-            # Bazı sürümler oturumu ancak çalmaya başlayınca açar: medya tuşu gönder.
+            # Some versions only open the session once playback starts: send a media key.
             _press_media_play()
-            return f"{label} arka planda açıldı ve oynat komutu gönderildi."
+            return f"{label} opened in the background and a play command was sent."
         if _status(session) != PLAYING:
             await session.try_play_async()
-            for _ in range(12):  # çalmaya başladı mı?
+            for _ in range(12):  # did it start playing?
                 await asyncio.sleep(0.25)
                 if _status(session) == PLAYING:
                     break
-        state = "çalıyor" if _status(session) == PLAYING else "hazır ama başlatılamadı"
+        state = "playing" if _status(session) == PLAYING else "ready but could not start"
         return f"{label}: {await _describe(session)} {state}."
 
     return _run(_play())
@@ -233,13 +233,13 @@ def play_music(app: str = "spotify") -> str:
 @tool(
     name="now_playing",
     description=(
-        "Şu anda çalan veya en son çalınan medyayı söyler (şarkı, sanatçı, uygulama). "
-        "Spotify/Apple Music/tarayıcı fark etmez; arka planda okur."
+        "Says what media is playing now or was last played (song, artist, app). "
+        "Spotify/Apple Music/browser all work; reads in the background."
     ),
     parameters={
         "type": "object",
         "properties": {
-            "app": {"type": "string", "description": "İsteğe bağlı: 'spotify' veya 'apple music'."}
+            "app": {"type": "string", "description": "Optional: 'spotify' or 'apple music'."}
         },
     },
     risk=Risk.SAFE,
@@ -249,8 +249,8 @@ def now_playing(app: str | None = None) -> str:
         mgr = await _manager()
         session = _find(mgr, _norm_app(app))
         if session is None:
-            return "Şu anda aktif bir medya oturumu yok."
-        state = STATUS.get(_status(session), "bilinmiyor")
+            return "There is no active media session right now."
+        state = STATUS.get(_status(session), "unknown")
         return f"{_app_label(session)}: {await _describe(session)} ({state})"
 
     return _run(_inner())
@@ -259,9 +259,9 @@ def now_playing(app: str | None = None) -> str:
 @tool(
     name="media_control",
     description=(
-        "Çalan medyayı arka planda kontrol eder: 'pause', 'toggle', 'next', 'previous', "
-        "'stop', 'play'. Uygulama verilmezse çalan müzik uygulaması seçilir. "
-        "Kapalı bir uygulamada şarkı başlatmak için play_music kullan."
+        "Controls the playing media in the background: 'pause', 'toggle', 'next', 'previous', "
+        "'stop', 'play'. If no app is given, the playing music app is chosen. "
+        "To start a song in a closed app, use play_music."
     ),
     parameters={
         "type": "object",
@@ -269,9 +269,9 @@ def now_playing(app: str | None = None) -> str:
             "action": {
                 "type": "string",
                 "enum": ["play", "pause", "toggle", "next", "previous", "stop"],
-                "description": "Yapılacak işlem.",
+                "description": "The action to perform.",
             },
-            "app": {"type": "string", "description": "İsteğe bağlı: 'spotify' veya 'apple music'."},
+            "app": {"type": "string", "description": "Optional: 'spotify' or 'apple music'."},
         },
         "required": ["action"],
     },
@@ -282,7 +282,7 @@ def media_control(action: str, app: str | None = None) -> str:
         mgr = await _manager()
         session = _find(mgr, _norm_app(app))
         if session is None:
-            return "Aktif medya oturumu yok."
+            return "No active media session."
         fn = {
             "play": session.try_play_async,
             "pause": session.try_pause_async,
@@ -292,14 +292,14 @@ def media_control(action: str, app: str | None = None) -> str:
             "stop": session.try_stop_async,
         }.get(action)
         if fn is None:
-            return f"Geçersiz işlem: {action}"
+            return f"Invalid action: {action}"
         ok = await fn()
         if not ok:
-            return f"{_app_label(session)} bu işlemi reddetti."
+            return f"{_app_label(session)} rejected this action."
         if action in ("next", "previous"):
             await asyncio.sleep(0.6)
             return f"{_app_label(session)}: {await _describe(session)}"
-        words = {"play": "oynatılıyor", "pause": "duraklatıldı", "toggle": "değiştirildi", "stop": "durduruldu"}
+        words = {"play": "playing", "pause": "paused", "toggle": "toggled", "stop": "stopped"}
         return f"{_app_label(session)} {words[action]}."
 
     return _run(_inner())

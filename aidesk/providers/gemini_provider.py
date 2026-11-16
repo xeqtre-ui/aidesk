@@ -1,4 +1,4 @@
-"""Google (Gemini) sağlayıcısı — resmi `google-genai` kütüphanesi ile."""
+"""Google (Gemini) provider — using the official `google-genai` library."""
 from __future__ import annotations
 
 import logging
@@ -13,7 +13,7 @@ log = logging.getLogger("aidesk.gemini")
 
 
 def _to_gemini_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """JSON Schema'yı Gemini'nin kabul ettiği alt kümeye çevirir."""
+    """Converts JSON Schema to the subset Gemini accepts."""
     out: dict[str, Any] = {}
     for k, v in schema.items():
         if k == "type" and isinstance(v, str):
@@ -36,8 +36,8 @@ class GeminiProvider(Provider):
         from google.genai import types
 
         self._types = types
-        # Kütüphanenin kendi bekle-yeniden-dene döngüsünü kapat (kota dolunca
-        # dakikalarca donuyordu). Yedek modele geçişi biz yönetiyoruz.
+        # Turn off the library's own wait-and-retry loop (on quota exhaustion it used
+        # to freeze for minutes). We manage the switch to a backup model ourselves.
         self.client = genai.Client(
             api_key=api_key,
             http_options=types.HttpOptions(
@@ -52,7 +52,7 @@ class GeminiProvider(Provider):
         for t in tools:
             d: dict[str, Any] = {"name": t["name"], "description": t["description"]}
             params = _to_gemini_schema(t["parameters"])
-            if params.get("properties"):  # boş nesne şeması gönderilmez
+            if params.get("properties"):  # an empty object schema is not sent
                 d["parameters"] = params
             decls.append(d)
         return [{"function_declarations": decls}]
@@ -62,7 +62,7 @@ class GeminiProvider(Provider):
         return types.Content(role="user", parts=[types.Part.from_text(text=text)])
 
     def _flash_candidates(self) -> list[str]:
-        """Yedek modeller: 'gemini-X-flash' (yeniden eskiye), sonra '-flash-lite'."""
+        """Backup models: 'gemini-X-flash' (newest to oldest), then '-flash-lite'."""
         if self._candidates_cache is None:
             flash, lite = [], []
             try:
@@ -71,12 +71,14 @@ class GeminiProvider(Provider):
                     if match:
                         (lite if match.group(3) else flash).append((float(match.group(2)), match.group(1)))
             except Exception:  # noqa: BLE001
-                log.warning("Gemini model listesi alınamadı", exc_info=True)
+                log.warning("Could not get the Gemini model list", exc_info=True)
             self._candidates_cache = [n for _, n in sorted(flash, reverse=True)] + \
                                      [n for _, n in sorted(lite, reverse=True)]
         return [m for m in self._candidates_cache if m != self.model]
 
-    def _generate(self, model: str, messages, config):
+    def _generate(self, model: str, messages, config, timeout_ms: int | None = None):
+        if timeout_ms:
+            config = config.model_copy(update={"http_options": self._types.HttpOptions(timeout=timeout_ms)})
         return self.client.models.generate_content(model=model, contents=messages, config=config)
 
     def chat(self, system, messages, tools) -> AssistantTurn:
@@ -90,36 +92,58 @@ class GeminiProvider(Provider):
             tools=tools or None,
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
+        if self.model.startswith("gemini-3") and not getattr(self, "_no_thinking_cfg", False):
+            # The default long "thinking" keeps the voice assistant waiting (~2 s/step -> ~1 s)
+            config = config.model_copy(update={"thinking_config": types.ThinkingConfig(thinking_level="low")})
         resp = None
         first_error: Exception | None = None
-        for model in [self.model, *self._flash_candidates()]:
+        for i, model in enumerate([self.model, *self._flash_candidates()]):
             if apierrors.is_cooling(model):
                 continue
             try:
-                resp = self._generate(model, messages, config)
+                # Try backup models quickly: a busy (504) model shouldn't keep everyone waiting
+                resp = self._generate(model, messages, config, None if i == 0 else 12_000)
             except (errors.ClientError, errors.ServerError) as e:
                 code = e.code or 0
-                if code == 429:      # bu modelin kotası doldu: sıfırlanana kadar atla
+                if code == 400 and "thinking" in str(e).lower() and config.thinking_config is not None:
+                    # This model doesn't support the thinking setting: retry without it
+                    self._no_thinking_cfg = True
+                    config = config.model_copy(update={"thinking_config": None})
+                    resp = self._generate(model, messages, config)
+                    break
+                if code == 429:      # this model's quota is used up: skip until it resets
                     apierrors.cool(model, apierrors.retry_delay(e))
-                elif code == 404:    # model kaldırılmış
+                elif code == 404:    # the model was removed
                     apierrors.cool(model, 86_400)
-                elif code >= 500:    # Google tarafı yoğun: kısa süre atla
-                    apierrors.cool(model, 120)
+                elif code >= 500:    # Google side is busy: skip for a while
+                    apierrors.cool(model, 3600)  # busy model: skip for 1 hour
                 else:
-                    raise            # ör. geçersiz anahtar: başka modele geçmek anlamsız
-                log.warning("Gemini %s kullanılamadı (%s), sıradaki modele geçiliyor", model, code)
+                    raise            # e.g. invalid key: switching to another model is pointless
+                log.warning("Gemini %s unusable (%s), moving to the next model", model, code)
+                first_error = first_error or e
+                continue
+            except Exception as e:  # noqa: BLE001 — network timeout etc.: skip this model
+                if "timeout" not in type(e).__name__.lower() and "timed out" not in str(e).lower():
+                    raise
+                apierrors.cool(model, 600)
+                log.warning("Gemini %s timed out, moving to the next model", model)
                 first_error = first_error or e
                 continue
             if model != self.model:
-                # Çalışan modeli kaydet: bir dahaki açılışta boşuna denemeyle vakit kaybetmesin.
-                log.warning("Gemini modeli %s olarak değiştirildi", model)
-                s = app_config.load_settings()
-                s.model = {**s.model, "gemini": model}
-                app_config.save_settings(s)
+                # Quota (429) / load (5xx) are temporary: the backup model is used ONLY this
+                # session; the next day it returns to the main model. A permanent change is made
+                # only if the main model was removed entirely (404).
+                retired = first_error is not None and (getattr(first_error, "code", 0) or 0) == 404
+                log.warning("Gemini model switched to %s (%s)", model,
+                            "permanent" if retired else "for this session")
+                if retired and not model.endswith("-lite"):
+                    s = app_config.load_settings()
+                    s.model = {**s.model, "gemini": model}
+                    app_config.save_settings(s)
                 self.model = model
             break
         if resp is None:
-            raise first_error or RuntimeError("Kullanılabilir Gemini modeli yok (hepsinin kotası dolu).")
+            raise first_error or RuntimeError("No usable Gemini model (all quotas exhausted).")
         content = resp.candidates[0].content if resp.candidates else None
         text_parts: list[str] = []
         tool_calls: list[ToolCall] = []

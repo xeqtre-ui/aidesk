@@ -1,4 +1,4 @@
-"""Anthropic (Claude) sağlayıcısı."""
+"""Anthropic (Claude) provider."""
 from __future__ import annotations
 
 from typing import Any
@@ -11,7 +11,7 @@ class AnthropicProvider(Provider):
 
     def __init__(self, api_key: str, model: str) -> None:
         super().__init__(api_key, model)
-        import anthropic  # tembel içe aktarma
+        import anthropic  # lazy import
 
         self.client = anthropic.Anthropic(api_key=api_key)
 
@@ -46,11 +46,11 @@ class AnthropicProvider(Provider):
         return AssistantTurn(
             text="".join(text_parts),
             tool_calls=tool_calls,
-            raw=resp.content,  # content bloklarını geçmişe ekleyeceğiz
+            raw=resp.content,  # we'll append the content blocks to the history
         )
 
     def append_assistant(self, messages, turn: AssistantTurn) -> None:
-        # Claude için assistant mesajı doğrudan content bloklarıdır.
+        # For Claude the assistant message is the content blocks directly.
         content = []
         for block in turn.raw:
             if block.type == "text":

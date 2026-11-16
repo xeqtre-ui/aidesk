@@ -1,15 +1,16 @@
-"""Sesli komut — yerel konuşma tanıma (faster-whisper, çevrimdışı).
+"""Voice command — local speech recognition (faster-whisper, offline).
 
-Düşük seviyeli mikrofonlarda da çalışması için:
-- İlk ~0.4 sn ortam gürültüsü ölçülür, konuşma eşiği buna göre ayarlanır.
-- Kayıt, mikrofonun kendi örnekleme hızında yapılır ve 16 kHz'e çevrilir.
-- Tanımadan önce ses seviyesi normalize edilir (kısık mikrofon yükseltilir).
-- Kayıt `stop()` ile elle de bitirilebilir (tıkla-başlat / tıkla-bitir).
+To also work with low-grade microphones:
+- The first ~0.4 s measures ambient noise and sets the speech threshold accordingly.
+- Recording is done at the microphone's own sample rate and converted to 16 kHz.
+- The level is normalized before recognition (a quiet mic is boosted).
+- Recording can also be ended by hand with `stop()` (click-to-start / click-to-stop).
 """
 from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import time
 from typing import Callable
@@ -31,7 +32,7 @@ def _resample(audio: np.ndarray, sr: int) -> np.ndarray:
 
 
 def _wav_bytes(audio: np.ndarray) -> bytes:
-    """16 kHz float32 sesi WAV (int16) baytlarına çevirir."""
+    """Converts 16 kHz float32 audio to WAV (int16) bytes."""
     import io
     import wave
 
@@ -45,16 +46,16 @@ def _wav_bytes(audio: np.ndarray) -> bytes:
 
 
 class CloudTranscriber:
-    """Kullanıcının kendi API anahtarıyla hızlı, yüksek kaliteli yazıya dökme.
+    """Fast, high-quality transcription with the user's own API key.
 
-    Gemini: ~1 sn. OpenAI: gpt-4o-mini-transcribe. Hata olursa None döner ve
-    yerel Whisper'a düşülür.
+    Gemini: ~1 s. OpenAI: gpt-4o-mini-transcribe. On error it returns None and
+    falls back to local Whisper.
     """
 
-    # Sadece "lite" modeller: komutların kullandığı flash kotasını yemesin.
+    # Only "lite" models: don't eat into the flash quota the commands use.
     GEMINI_MODELS = ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite")
-    PROMPT = ("Bu ses kaydındaki konuşmayı olduğu gibi yazıya dök. Sadece söylenen "
-              "metni yaz, açıklama ekleme. Konuşma yoksa hiçbir şey yazma.")
+    PROMPT = ("Transcribe the speech in this recording exactly as spoken. Write only the "
+              "spoken text, add no explanation. If there is no speech, write nothing.")
 
     def __init__(self, provider: str, api_key: str, language: str) -> None:
         self.provider = provider
@@ -92,25 +93,25 @@ class CloudTranscriber:
                     last_error = e
                     code = apierrors.status_code(e)
                     apierrors.cool(model, apierrors.retry_delay(e) if code == 429 else 300)
-                    log.warning("Gemini yazıya dökme (%s) başarısız: %s", model, str(e)[:120])
-            raise RuntimeError(f"Gemini yazıya dökemedi: {last_error}")
+                    log.warning("Gemini transcription (%s) failed: %s", model, str(e)[:120])
+            raise RuntimeError(f"Gemini could not transcribe: {last_error}")
         if self.provider == "openai":
             from openai import OpenAI
 
             if self._client is None:
                 self._client = OpenAI(api_key=self.api_key, timeout=10)
             r = self._client.audio.transcriptions.create(
-                model="gpt-4o-mini-transcribe", file=("komut.wav", data), language=self.language
+                model="gpt-4o-mini-transcribe", file=("command.wav", data), language=self.language
             )
             return (r.text or "").strip()
-        raise RuntimeError(f"{self.provider} ses desteklemiyor")
+        raise RuntimeError(f"{self.provider} does not support audio")
 
 
 _NOT_A_MIC = ("eşleştirici", "mapper", "stereo mix", "stereo karışımı", "what u hear", "loopback")
 
 
 def list_microphones() -> list[str]:
-    """Varsayılan ses API'sindeki gerçek mikrofonların adları."""
+    """Names of the real microphones in the default audio API."""
     import sounddevice as sd
 
     host = sd.default.hostapi
@@ -127,23 +128,24 @@ class NoAudioError(RuntimeError):
     pass
 
 
-_DEAD_MICS: dict[str, float] = {}  # mikrofon adı -> bu zamana kadar sona at
-_CLOSERS: list[threading.Thread] = []  # arka planda kapanan akışlar
+_DEAD_MICS: dict[str, float] = {}  # mic name -> deprioritize until this time
+_CLOSERS: list[threading.Thread] = []  # streams closing in the background
+ACTIVE_STREAMS: set[int] = set()       # continuously open streams (e.g. wake word)
 
 
 def _refresh_devices() -> None:
-    """Bluetooth cihazlar bağlanıp kopunca liste değişir: PortAudio'yu yenile.
-    Hâlâ kapanmakta olan bir akış varsa dokunma (çökme riski)."""
+    """When Bluetooth devices connect/disconnect the list changes: refresh PortAudio.
+    If a stream is still closing, don't touch it (crash risk)."""
     import sounddevice as sd
 
     _CLOSERS[:] = [t for t in _CLOSERS if t.is_alive()]
-    if _CLOSERS:
+    if _CLOSERS or ACTIVE_STREAMS:   # refreshing while a stream is open breaks it
         return
     try:
         sd._terminate()
         sd._initialize()
     except Exception:  # noqa: BLE001
-        log.debug("Ses cihazı listesi yenilenemedi", exc_info=True)
+        log.debug("Could not refresh audio device list", exc_info=True)
 
 
 def _device_index(name: str) -> int | None:
@@ -179,25 +181,25 @@ class SpeechToText:
             if self._model is None:
                 from faster_whisper import WhisperModel
 
-                log.info("Whisper modeli yükleniyor: %s", self.model_size)
+                log.info("Loading Whisper model: %s", self.model_size)
                 self._model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
-                log.info("Whisper modeli hazır")
-        return "Ses modeli hazır."
+                log.info("Whisper model ready")
+        return "Voice model ready."
 
-    # --- Kayıt -------------------------------------------------------------
+    # --- Recording ---------------------------------------------------------
     def arm(self) -> None:
-        """Yeni kayıttan ÖNCE (ana iş parçacığında) çağrılır; erken 'bitir' basışı kaybolmaz."""
+        """Called BEFORE a new recording (on the main thread); an early 'finish' press isn't lost."""
         self._stop.clear()
 
     def stop(self) -> None:
         self._stop.set()
 
     def _device_candidates(self) -> list[str]:
-        """Denenecek mikrofon adları, sırayla:
-        1) Ayarlar'da seçilen mikrofon, 2) dahili/kablolu mikrofonlar (sistem
-        varsayılanı önce), 3) Bluetooth kulaklıklar. Kulaklık mikrofonu açılınca
-        Windows müziği telefon kalitesine düşürdüğü ve bazen hiç ses vermediği
-        için varsayılan olarak sona bırakılır. Ses vermeyenler en sona atılır."""
+        """Microphone names to try, in order:
+        1) the mic selected in Settings, 2) built-in/wired mics (system default
+        first), 3) Bluetooth headsets. When a headset mic is opened Windows drops
+        the music to phone quality and sometimes gives no audio at all, so it is
+        left for last by default. Mics that give no audio are pushed to the very end."""
         import sounddevice as sd
 
         _refresh_devices()
@@ -212,10 +214,10 @@ class SpeechToText:
         order = sorted(
             names,
             key=lambda n: (
-                _DEAD_MICS.get(n, 0) > now,          # ölüler en sonda
-                n != self.mic_name,                  # seçilen en başta
-                is_bt(n),                            # kulaklıklar sonra
-                n != default_name,                   # sistem varsayılanı önce
+                _DEAD_MICS.get(n, 0) > now,          # dead ones last
+                n != self.mic_name,                  # the selected one first
+                is_bt(n),                            # headsets later
+                n != default_name,                   # system default first
             ),
         )
         return order
@@ -242,11 +244,11 @@ class SpeechToText:
                 try:
                     return self._record_from(dev, max_seconds, silence_duration, no_speech_timeout, on_level)
                 except (NoAudioError, sd.PortAudioError) as e:
-                    log.warning("Mikrofon kullanılamadı: %s (%s) — sıradakine geçiliyor", name, e)
-                    _DEAD_MICS[name] = time.time() + 600  # 10 dk boyunca sona at
+                    log.warning("Microphone unusable: %s (%s) — moving to the next", name, e)
+                    _DEAD_MICS[name] = time.time() + 600  # deprioritize for 10 min
                     last = e
             if last:
-                raise NoAudioError("Hiçbir mikrofondan ses gelmiyor. Mikrofon kapalı ya da sessizde olabilir.")
+                raise NoAudioError("No audio from any microphone. The mic may be off or muted.")
             return np.zeros(0, np.float32)
         finally:
             self.recording = False
@@ -272,7 +274,7 @@ class SpeechToText:
         stream = sd.InputStream(device=device, samplerate=sr, channels=1, dtype="float32",
                                 blocksize=block, callback=_cb)
         stream.start()
-        log.info("Mikrofon: %s (%d Hz)", info["name"], sr)
+        log.info("Microphone: %s (%d Hz)", info["name"], sr)
         try:
             while elapsed < max_seconds and not self._stop.is_set():
                 try:
@@ -280,7 +282,7 @@ class SpeechToText:
                 except queue.Empty:
                     waited += 0.1
                     if not frames and waited >= 1.5:
-                        raise NoAudioError(info["name"])  # bu mikrofon hiç veri göndermiyor
+                        raise NoAudioError(info["name"])  # this mic sends no data at all
                     continue
                 waited = 0.0
                 frames.append(mono)
@@ -289,12 +291,12 @@ class SpeechToText:
                 if on_level:
                     on_level(level)
 
-                if threshold is None:  # ilk 0.4 sn: ortam gürültüsünü ölç
+                if threshold is None:  # first 0.4 s: measure ambient noise
                     noise_levels.append(level)
                     if elapsed >= 0.4:
                         noise = float(np.median(noise_levels))
                         threshold = max(0.0015, noise * 3.0)
-                        log.info("Gürültü %.5f, konuşma eşiği %.5f", noise, threshold)
+                        log.info("Noise %.5f, speech threshold %.5f", noise, threshold)
                     continue
 
                 if level > threshold:
@@ -305,10 +307,10 @@ class SpeechToText:
                     if silent_for >= silence_duration:
                         break
                 elif elapsed >= no_speech_timeout:
-                    log.info("Konuşma algılanmadı")
+                    log.info("No speech detected")
                     break
         finally:
-            # Ölü Bluetooth mikrofonunu kapatmak ~6 sn sürebiliyor: bekleme, arka planda kapat.
+            # Closing a dead Bluetooth mic can take ~6 s: don't wait, close it in the background.
             def _close() -> None:
                 try:
                     stream.abort()
@@ -319,27 +321,43 @@ class SpeechToText:
             closer = threading.Thread(target=_close, daemon=True)
             _CLOSERS.append(closer)
             closer.start()
+        if spoke_time < 0.25:          # no real speech: noise/silence
+            return np.zeros(0, np.float32)
         audio = np.concatenate(frames) if frames else np.zeros(0, np.float32)
         return _resample(audio, sr)
 
-    # --- Tanıma ------------------------------------------------------------
+    # --- Recognition -------------------------------------------------------
+    @staticmethod
+    def is_junk(text: str) -> bool:
+        """Text that speech recognition invents on silence/noise ("00:00", "Bu",
+        "Altyazı M.K." etc.). The phrase list is Turkish because it matches
+        Turkish ASR hallucinations; kept as-is."""
+        t = text.strip().lower()
+        letters = re.sub(r"[^a-zçğıöşü]", "", t)
+        if len(letters) < 3:
+            return True
+        junk = ("altyazı", "abone ol", "izlediğiniz için", "teşekkürler izlediğiniz",
+                "subtitles by", "thank you for watching", "müzik çalıyor")
+        return any(j in t for j in junk) and len(t) < 40
+
     def transcribe(self, audio: np.ndarray) -> str:
         if audio.size < TARGET_SR * 0.3:
             return ""
         peak = float(np.abs(audio).max())
-        if peak < 0.0015:  # neredeyse tamamen sessiz
+        if peak < 0.0015:  # almost completely silent
             return ""
-        audio = (audio / peak * 0.9).astype(np.float32)  # kısık mikrofonu yükselt
+        audio = (audio / peak * 0.9).astype(np.float32)  # boost a quiet mic
         t0 = time.time()
         if self.cloud is not None:
             try:
                 text = self.cloud(audio)
-                if text.startswith(("(", "[")) and text.endswith((")", "]")):
-                    text = ""  # "(sessizlik)" gibi açıklamalar
-                log.info("Tanınan (bulut, %.1f sn): %r", time.time() - t0, text)
+                if (text.startswith(("(", "[")) and text.endswith((")", "]"))) or self.is_junk(text):
+                    log.info("Skipped meaningless recognition: %r", text)
+                    text = ""  # inventions like "(silence)", "00:00"
+                log.info("Recognized (cloud, %.1f s): %r", time.time() - t0, text)
                 return text
             except Exception as e:  # noqa: BLE001
-                log.warning("Bulut ses tanıma başarısız, yerel modele geçiliyor: %s", e)
+                log.warning("Cloud speech recognition failed, falling back to local model: %s", e)
         self.preload()
         segments, _ = self._model.transcribe(
             audio,
@@ -351,8 +369,8 @@ class SpeechToText:
             vad_parameters={"min_silence_duration_ms": 500},
         )
         text = " ".join(s.text.strip() for s in segments).strip()
-        log.info("Tanınan (yerel, %.1f sn): %r", time.time() - t0, text)
-        return text
+        log.info("Recognized (local, %.1f s): %r", time.time() - t0, text)
+        return "" if self.is_junk(text) else text
 
     def listen(self, on_level: Callable[[float], None] | None = None) -> str:
         return self.transcribe(self.record(on_level=on_level))

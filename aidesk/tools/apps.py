@@ -1,4 +1,4 @@
-"""Uygulama ve pencere yönetimi araçları."""
+"""App and window management tools."""
 from __future__ import annotations
 
 import os
@@ -7,8 +7,9 @@ import subprocess
 
 from . import Risk, tool
 
-# Yaygın uygulamalar için kısa ad -> başlatma hedefi eşlemesi.
-# 'start' kabuğu çoğu kayıtlı uygulamayı adıyla açabilir.
+# Short name -> launch target mapping for common apps.
+# The 'start' shell can open most registered apps by name.
+# (Turkish names like "not defteri"/"ayarlar" are kept: the user may say them.)
 _KNOWN_APPS = {
     "spotify": "spotify:",
     "apple music": "msmusic:",
@@ -33,16 +34,16 @@ _KNOWN_APPS = {
 @tool(
     name="open_app",
     description=(
-        "Bir uygulamayı veya URI'yi açar. 'spotify', 'chrome', 'not defteri' "
-        "gibi yaygın adları tanır; tanımadığını Windows kabuğu üzerinden "
-        "adıyla açmayı dener. Uygulama zaten açıksa öne getirir."
+        "Opens an app or a URI. Recognizes common names like 'spotify', 'chrome', "
+        "'not defteri' (Notepad); for an unknown one it tries to open it by name via "
+        "the Windows shell. If the app is already open, brings it to the front."
     ),
     parameters={
         "type": "object",
         "properties": {
             "name": {
                 "type": "string",
-                "description": "Uygulama adı veya başlatma hedefi (ör. 'spotify').",
+                "description": "App name or launch target (e.g. 'spotify').",
             }
         },
         "required": ["name"],
@@ -54,24 +55,24 @@ def open_app(name: str) -> str:
     target = _KNOWN_APPS.get(key, name.strip())
     try:
         if os.name == "nt":
-            # Protokol/URI (ör. spotify:) veya ms-settings: ise doğrudan start.
+            # If it's a protocol/URI (e.g. spotify:) or ms-settings:, start directly.
             if target.endswith(":") or "://" in target:
                 os.startfile(target)  # type: ignore[attr-defined]
             elif shutil.which(target):
                 subprocess.Popen(target, shell=False)
             else:
-                # Kabuk üzerinden kayıtlı uygulama adıyla aç.
+                # Open a registered app by name via the shell.
                 subprocess.Popen(["cmd", "/c", "start", "", target], shell=False)
         else:
             subprocess.Popen([target])
-        return f"'{name}' açıldı."
+        return f"Opened '{name}'."
     except Exception as e:  # noqa: BLE001
-        return f"'{name}' açılamadı: {e}"
+        return f"Could not open '{name}': {e}"
 
 
 @tool(
     name="list_windows",
-    description="Açık pencerelerin başlıklarını listeler.",
+    description="Lists the titles of open windows.",
     risk=Risk.SAFE,
 )
 def list_windows() -> str:
@@ -80,21 +81,21 @@ def list_windows() -> str:
 
         titles = [t for t in gw.getAllTitles() if t.strip()]
         if not titles:
-            return "Görünür pencere yok."
-        return "Açık pencereler:\n- " + "\n- ".join(titles[:40])
+            return "No visible windows."
+        return "Open windows:\n- " + "\n- ".join(titles[:40])
     except Exception as e:  # noqa: BLE001
-        return f"Pencereler okunamadı: {e}"
+        return f"Could not read windows: {e}"
 
 
 @tool(
     name="focus_window",
-    description="Başlığında verilen metni içeren pencereyi öne getirir/etkinleştirir.",
+    description="Brings to the front/activates the window whose title contains the given text.",
     parameters={
         "type": "object",
         "properties": {
             "title_contains": {
                 "type": "string",
-                "description": "Pencere başlığında aranacak metin (ör. 'Spotify').",
+                "description": "Text to look for in the window title (e.g. 'Spotify').",
             }
         },
         "required": ["title_contains"],
@@ -111,21 +112,21 @@ def focus_window(title_contains: str) -> str:
                 if w.isMinimized:
                     w.restore()
                 w.activate()
-                return f"'{w.title}' öne getirildi."
-        return f"'{title_contains}' içeren pencere bulunamadı."
+                return f"Brought '{w.title}' to the front."
+        return f"No window containing '{title_contains}' found."
     except Exception as e:  # noqa: BLE001
-        return f"Pencere öne getirilemedi: {e}"
+        return f"Could not bring the window to the front: {e}"
 
 
 @tool(
     name="close_app",
-    description="Verilen ada sahip süreci/uygulamayı kapatır (sonlandırır).",
+    description="Closes (terminates) the process/app with the given name.",
     parameters={
         "type": "object",
         "properties": {
             "process_name": {
                 "type": "string",
-                "description": "Süreç adı (ör. 'spotify', 'notepad'). .exe gerekmez.",
+                "description": "Process name (e.g. 'spotify', 'notepad'). No .exe needed.",
             }
         },
         "required": ["process_name"],
@@ -146,5 +147,5 @@ def close_app(process_name: str) -> str:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     if killed:
-        return f"{killed} süreç sonlandırıldı ('{process_name}')."
-    return f"'{process_name}' adlı çalışan süreç bulunamadı."
+        return f"Terminated {killed} process(es) ('{process_name}')."
+    return f"No running process named '{process_name}' found."

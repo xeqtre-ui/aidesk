@@ -1,10 +1,10 @@
-"""Bilgisayar kontrol araçları.
+"""Computer control tools.
 
-Her araç bir `Tool` olarak kaydedilir: ad, açıklama, JSON Schema girdi
-tanımı, çağrılabilir fonksiyon ve bir "risk" seviyesi. Riskli araçlar
-(ör. kabuk komutu, dosya silme) çalıştırılmadan önce kullanıcı onayı ister.
+Each tool is registered as a `Tool`: a name, description, JSON Schema input
+definition, a callable function and a "risk" level. Risky tools (e.g. shell
+command, deleting files) ask for user approval before running.
 
-Araç şeması sağlayıcıdan bağımsızdır; her sağlayıcı kendi biçimine çevirir.
+The tool schema is provider-independent; each provider converts it to its own format.
 """
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ from typing import Any, Callable
 
 
 class Risk(str, Enum):
-    SAFE = "safe"        # okuma / zararsız
-    MEDIUM = "medium"    # uygulama açma, medya, yazma
-    HIGH = "high"        # kabuk komutu, dosya silme, tıklama otomasyonu
+    SAFE = "safe"        # reading / harmless
+    MEDIUM = "medium"    # opening apps, media, writing
+    HIGH = "high"        # shell command, deleting files, click automation
 
 
 @dataclass
@@ -38,7 +38,7 @@ def tool(
     parameters: dict[str, Any] | None = None,
     risk: Risk = Risk.SAFE,
 ) -> Callable[[Callable[..., str]], Callable[..., str]]:
-    """Bir fonksiyonu araç olarak kaydeden dekoratör."""
+    """Decorator that registers a function as a tool."""
 
     def deco(func: Callable[..., str]) -> Callable[..., str]:
         _REGISTRY[name] = Tool(
@@ -62,7 +62,7 @@ def get_tool(name: str) -> Tool | None:
 
 
 def schema() -> list[dict[str, Any]]:
-    """Ortak (sağlayıcıdan bağımsız) araç şeması."""
+    """The common (provider-independent) tool schema."""
     return [
         {"name": t.name, "description": t.description, "parameters": t.parameters}
         for t in _REGISTRY.values()
@@ -70,19 +70,21 @@ def schema() -> list[dict[str, Any]]:
 
 
 def execute(name: str, arguments: dict[str, Any]) -> str:
-    """Bir aracı çalıştırır ve metin sonucu döner. Hatalar yakalanır."""
+    """Runs a tool and returns a text result. Errors are caught."""
     t = get_tool(name)
     if t is None:
-        return f"HATA: '{name}' adlı araç bulunamadı."
+        return f"ERROR: no tool named '{name}' found."
     try:
         result = t.func(**(arguments or {}))
-        return str(result) if result is not None else "Tamamlandı."
+        return str(result) if result is not None else "Done."
     except TypeError as e:
-        return f"HATA: Geçersiz argümanlar ({e})."
-    except Exception as e:  # noqa: BLE001 — araç hatasını modele geri bildiriyoruz
-        return f"HATA: {e}\n{traceback.format_exc(limit=2)}"
+        return f"ERROR: invalid arguments ({e})."
+    except Exception as e:  # noqa: BLE001 — we report the tool error back to the model
+        return f"ERROR: {e}\n{traceback.format_exc(limit=2)}"
 
 
 def load_all() -> None:
-    """Tüm araç modüllerini içe aktararak kaydolmalarını sağlar."""
-    from . import apps, files, media, system  # noqa: F401
+    """Imports all tool modules so they register themselves."""
+    from . import apps, files, media, spotify_search, system, vision, web  # noqa: F401
+    from .. import memory  # noqa: F401  (remember / forget tools)
+    from .. import workspace  # noqa: F401  (terminal mode: ws_* tools)

@@ -1,4 +1,4 @@
-"""PyInstaller giriş noktası (paket dışından çalıştırmak için)."""
+"""PyInstaller entry point (to run from outside the package)."""
 from aidesk.main import main
 
 raise SystemExit(main())

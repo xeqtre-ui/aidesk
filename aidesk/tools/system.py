@@ -1,8 +1,8 @@
-"""Sistem kontrolü — fare, klavye, ekran, pano, kabuk.
+"""System control — mouse, keyboard, screen, clipboard, shell.
 
-DİKKAT: Bu araçlar bilgisayarı doğrudan kontrol eder (tam otomasyon).
-Yüksek riskli olanlar (kabuk komutu, tıklama) asistan döngüsünde kullanıcı
-onayından geçer.
+CAUTION: These tools control the computer directly (full automation).
+High-risk ones (shell command, clicking) go through user approval in the
+assistant loop.
 """
 from __future__ import annotations
 
@@ -17,41 +17,64 @@ from . import Risk, tool
 def _pyautogui():
     import pyautogui
 
-    pyautogui.FAILSAFE = True   # fareyi sol-üst köşeye atınca durdur
+    pyautogui.FAILSAFE = True   # stop when the mouse is thrown to the top-left corner
     pyautogui.PAUSE = 0.05
     return pyautogui
 
 
 @tool(
     name="type_text",
-    description="Odaktaki pencereye verilen metni yazar (klavye simülasyonu).",
+    description="Types the given text into the focused window (keyboard simulation).",
     parameters={
         "type": "object",
         "properties": {
-            "text": {"type": "string", "description": "Yazılacak metin."}
+            "text": {"type": "string", "description": "The text to type."}
         },
         "required": ["text"],
     },
     risk=Risk.HIGH,
 )
 def type_text(text: str) -> str:
+    paste_text(text)
+    return f"Typed {len(text)} characters."
+
+
+def paste_text(text: str) -> None:
+    """Types the text by pasting from the clipboard: Turkish characters (ş, ğ, ı, İ…) and
+    emoji come out correctly (keyboard simulation can't type them). The previous clipboard
+    content is restored."""
+    import time
+
+    import pyperclip
+
     pg = _pyautogui()
-    pg.typewrite(text, interval=0.01)
-    return f"{len(text)} karakter yazıldı."
+    try:
+        old = pyperclip.paste()
+    except Exception:  # noqa: BLE001
+        old = None
+    pyperclip.copy(text)
+    time.sleep(0.05)
+    pg.hotkey("ctrl", "v")
+    time.sleep(0.15)
+    if old is not None:
+        try:
+            pyperclip.copy(old)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 @tool(
     name="press_keys",
     description=(
-        "Klavye kısayolu/tuş gönderir. Örnekler: 'enter', 'ctrl+c', "
-        "'alt+tab', 'win+d'. Birden çok tuş '+' ile birleştirilir."
+        "Sends a keyboard shortcut/key. Examples: 'enter', 'ctrl+c', "
+        "'alt+tab', 'win+d'. Multiple keys are joined with '+'."
     ),
     parameters={
         "type": "object",
         "properties": {
             "keys": {
                 "type": "string",
-                "description": "Tuş kombinasyonu, ör. 'ctrl+shift+esc'.",
+                "description": "Key combination, e.g. 'ctrl+shift+esc'.",
             }
         },
         "required": ["keys"],
@@ -62,26 +85,26 @@ def press_keys(keys: str) -> str:
     pg = _pyautogui()
     combo = [k.strip() for k in keys.lower().replace(" ", "").split("+") if k.strip()]
     if not combo:
-        return "Boş tuş kombinasyonu."
+        return "Empty key combination."
     pg.hotkey(*combo)
-    return f"'{keys}' gönderildi."
+    return f"Sent '{keys}'."
 
 
 @tool(
     name="click",
     description=(
-        "Ekranda verilen (x, y) koordinatına tıklar. button: 'left', 'right', "
-        "'double'. Koordinatları belirlemek için önce 'screenshot' alınabilir."
+        "Clicks the given (x, y) coordinate on the screen. button: 'left', 'right', "
+        "'double'. A 'screenshot' can be taken first to determine the coordinates."
     ),
     parameters={
         "type": "object",
         "properties": {
-            "x": {"type": "integer", "description": "X koordinatı (piksel)."},
-            "y": {"type": "integer", "description": "Y koordinatı (piksel)."},
+            "x": {"type": "integer", "description": "X coordinate (pixels)."},
+            "y": {"type": "integer", "description": "Y coordinate (pixels)."},
             "button": {
                 "type": "string",
                 "enum": ["left", "right", "double"],
-                "description": "Tıklama türü.",
+                "description": "Click type.",
             },
         },
         "required": ["x", "y"],
@@ -94,14 +117,14 @@ def click(x: int, y: int, button: str = "left") -> str:
         pg.doubleClick(x, y)
     else:
         pg.click(x, y, button=button)
-    return f"({x}, {y}) konumuna {button} tıklandı."
+    return f"{button}-clicked at ({x}, {y})."
 
 
 @tool(
     name="screenshot",
     description=(
-        "Ekranın görüntüsünü alır ve kaydeder. Döndürdüğü dosya yolu, görsel "
-        "akıl yürütme için modele geri verilebilir. Yüksek çözünürlüğü küçültür."
+        "Takes a screenshot of the screen and saves it. The returned file path can be "
+        "given back to the model for visual reasoning. Shrinks high resolutions."
     ),
     risk=Risk.SAFE,
 )
@@ -110,32 +133,32 @@ def screenshot() -> str:
     from ..config import CONFIG_DIR
 
     img = pg.screenshot()
-    # Boyutu makul tut.
+    # Keep the size reasonable.
     img.thumbnail((1600, 1600))
     out = CONFIG_DIR / "last_screenshot.png"
     img.save(out)
-    return f"Ekran görüntüsü kaydedildi: {out}"
+    return f"Screenshot saved: {out}"
 
 
 @tool(
     name="get_clipboard",
-    description="Panodaki (clipboard) metni okur.",
+    description="Reads the text on the clipboard.",
     risk=Risk.SAFE,
 )
 def get_clipboard() -> str:
     import pyperclip
 
     text = pyperclip.paste()
-    return text or "(pano boş)"
+    return text or "(clipboard empty)"
 
 
 @tool(
     name="set_clipboard",
-    description="Panoya (clipboard) metin kopyalar.",
+    description="Copies text to the clipboard.",
     parameters={
         "type": "object",
         "properties": {
-            "text": {"type": "string", "description": "Panoya kopyalanacak metin."}
+            "text": {"type": "string", "description": "The text to copy to the clipboard."}
         },
         "required": ["text"],
     },
@@ -145,19 +168,19 @@ def set_clipboard(text: str) -> str:
     import pyperclip
 
     pyperclip.copy(text)
-    return "Panoya kopyalandı."
+    return "Copied to clipboard."
 
 
 @tool(
     name="run_shell",
     description=(
-        "Bir kabuk komutu çalıştırır (Windows'ta PowerShell) ve çıktısını "
-        "döner. Çok güçlüdür; sadece gerektiğinde kullanın. 20 sn zaman aşımı."
+        "Runs a shell command (PowerShell on Windows) and returns its output. "
+        "Very powerful; use only when needed. 20 s timeout."
     ),
     parameters={
         "type": "object",
         "properties": {
-            "command": {"type": "string", "description": "Çalıştırılacak komut."}
+            "command": {"type": "string", "description": "The command to run."}
         },
         "required": ["command"],
     },
@@ -181,42 +204,42 @@ def run_shell(command: str) -> str:
             parts.append(out[:4000])
         if err:
             parts.append(f"[stderr] {err[:1000]}")
-        parts.append(f"(çıkış kodu {proc.returncode})")
+        parts.append(f"(exit code {proc.returncode})")
         return "\n".join(parts)
     except subprocess.TimeoutExpired:
-        return "HATA: Komut 20 saniyede tamamlanmadı."
+        return "ERROR: The command did not finish within 20 seconds."
 
 
 @tool(
     name="set_volume",
-    description="Sistem ses seviyesini ayarlar (0-100) veya sessize alır.",
+    description="Sets the system volume (0-100) or mutes.",
     parameters={
         "type": "object",
         "properties": {
             "level": {
                 "type": "integer",
-                "description": "0-100 arası ses seviyesi. mute=true ise yok sayılır.",
+                "description": "Volume level 0-100. Ignored if mute=true.",
             },
             "mute": {
                 "type": "boolean",
-                "description": "true ise sessize alır/açar.",
+                "description": "If true, toggles mute.",
             },
         },
     },
     risk=Risk.MEDIUM,
 )
 def set_volume(level: int | None = None, mute: bool | None = None) -> str:
-    # pyautogui üzerinden medya tuşları ile kaba ayar (ek bağımlılık gerekmez).
+    # Rough adjustment via media keys through pyautogui (no extra dependency needed).
     pg = _pyautogui()
     if mute:
         pg.press("volumemute")
-        return "Ses sessize alındı/açıldı."
+        return "Toggled mute."
     if level is not None:
         level = max(0, min(100, int(level)))
-        # Önce sıfırla, sonra kademeli artır (her basış ~%2).
+        # First reset, then step up gradually (each press ~2%).
         for _ in range(50):
             pg.press("volumedown")
         for _ in range(level // 2):
             pg.press("volumeup")
-        return f"Ses yaklaşık %{level} seviyesine ayarlandı."
-    return "Bir 'level' veya 'mute' belirtin."
+        return f"Set volume to approximately {level}%."
+    return "Specify a 'level' or 'mute'."

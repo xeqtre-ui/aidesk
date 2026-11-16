@@ -1,8 +1,8 @@
-"""AI sağlayıcı soyutlaması.
+"""AI provider abstraction.
 
-Tüm sağlayıcılar (Anthropic, OpenAI, Gemini) ortak bir `Provider` arayüzü
-üzerinden konuşur. Asistan döngüsü sağlayıcıdan bağımsızdır; sadece
-`chat(messages, tools)` çağırır ve dönen `AssistantTurn` nesnesini işler.
+All providers (Anthropic, OpenAI, Gemini) talk through a common `Provider`
+interface. The assistant loop is provider-independent; it only calls
+`chat(messages, tools)` and processes the returned `AssistantTurn` object.
 """
 from __future__ import annotations
 

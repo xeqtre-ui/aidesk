@@ -4,6 +4,7 @@ dist/
 __pycache__/
 *.pyc
 *.spec
+!packaging/aidesk.spec
 build.log
 radial_preview.png
 
@@ -25,3 +26,4 @@ last_screenshot.png
 *.key
 *.p12
 *.pfx
+bin/

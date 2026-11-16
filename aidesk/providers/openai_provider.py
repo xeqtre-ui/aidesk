@@ -1,4 +1,4 @@
-"""OpenAI (GPT) sağlayıcısı."""
+"""OpenAI (GPT) provider."""
 from __future__ import annotations
 
 import json
@@ -32,11 +32,15 @@ class OpenAIProvider(Provider):
 
     def chat(self, system, messages, tools) -> AssistantTurn:
         full = [{"role": "system", "content": system}, *messages]
+        extra = {}
+        if self.model.startswith(("gpt-5", "o3", "o4")):
+            extra["reasoning_effort"] = "low"     # reasoning models: don't keep the voice assistant waiting
         resp = self.client.chat.completions.create(
             model=self.model,
             messages=full,
             tools=tools or None,
             tool_choice="auto" if tools else None,
+            **extra,
         )
         msg = resp.choices[0].message
         tool_calls: list[ToolCall] = []

@@ -1,4 +1,4 @@
-"""Ayarlara göre doğru sağlayıcıyı oluşturan fabrika."""
+"""Factory that creates the right provider based on the settings."""
 from __future__ import annotations
 
 from .. import config
@@ -11,7 +11,7 @@ def get_provider(settings: config.Settings | None = None) -> Provider:
     api_key = config.get_api_key(provider)
     if not api_key:
         raise RuntimeError(
-            f"'{provider}' için API anahtarı bulunamadı. Kurulumu çalıştırın."
+            f"No API key found for '{provider}'. Run setup."
         )
     model = settings.active_model()
 
@@ -24,4 +24,4 @@ def get_provider(settings: config.Settings | None = None) -> Provider:
     if provider == "gemini":
         from .gemini_provider import GeminiProvider
         return GeminiProvider(api_key, model)
-    raise ValueError(f"Bilinmeyen sağlayıcı: {provider}")
+    raise ValueError(f"Unknown provider: {provider}")

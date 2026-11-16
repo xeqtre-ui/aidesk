@@ -1,7 +1,7 @@
-"""aidesk — Masaüstü AI asistanı.
+"""aidesk — Desktop AI assistant.
 
-Kısayolla çağrılan, kendi API anahtarınızla çalışan, bilgisayarı kontrol
-edebilen ve sesli komut alabilen bir masaüstü yardımcısı.
+A desktop helper invoked with a shortcut, running on your own API key, able to
+control the computer and take voice commands.
 """
 
 __version__ = "0.1.0"

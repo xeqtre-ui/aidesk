@@ -1,4 +1,4 @@
-"""assets/aidesk.ico dosyasını uygulamanın kendi ikon çiziminden üretir."""
+"""Generates assets/aidesk.ico from the app's own icon drawing."""
 import io
 import sys
 from pathlib import Path
@@ -21,4 +21,4 @@ img = Image.open(io.BytesIO(bytes(buf.data())))
 out = ROOT / "assets" / "aidesk.ico"
 out.parent.mkdir(exist_ok=True)
 img.save(out, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
-print("ikon:", out)
+print("icon:", out)

@@ -1,4 +1,4 @@
-"""Ortak sağlayıcı arayüzü ve veri yapıları."""
+"""Common provider interface and data structures."""
 from __future__ import annotations
 
 import abc
@@ -8,7 +8,7 @@ from typing import Any
 
 @dataclass
 class ToolCall:
-    """Modelin çağırmak istediği bir araç."""
+    """A tool the model wants to call."""
     id: str
     name: str
     arguments: dict[str, Any]
@@ -16,11 +16,11 @@ class ToolCall:
 
 @dataclass
 class AssistantTurn:
-    """Modelin bir adımdaki yanıtı.
+    """The model's response in one step.
 
-    `text` kullanıcıya gösterilecek metin; `tool_calls` varsa araçlar
-    çalıştırılıp sonuçlar geri beslenmeli. `raw` sağlayıcıya özgü mesaj
-    nesnesidir ve geçmişe eklenir.
+    `text` is the text to show the user; if there are `tool_calls` the tools must
+    be run and the results fed back. `raw` is the provider-specific message object
+    and is appended to the history.
     """
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
@@ -32,7 +32,7 @@ class AssistantTurn:
 
 
 class Provider(abc.ABC):
-    """Tüm AI sağlayıcılarının uyguladığı sözleşme."""
+    """The contract all AI providers implement."""
 
     name: str = "base"
 
@@ -41,7 +41,7 @@ class Provider(abc.ABC):
         self.model = model
 
     def user_message(self, text: str) -> Any:
-        """Kullanıcı mesajını sağlayıcının beklediği biçimde oluşturur."""
+        """Builds the user message in the format the provider expects."""
         return {"role": "user", "content": text}
 
     @abc.abstractmethod
@@ -51,12 +51,12 @@ class Provider(abc.ABC):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> AssistantTurn:
-        """Bir tur sohbet yürütür.
+        """Runs one turn of chat.
 
         Args:
-            system: Sistem yönergesi.
-            messages: Sağlayıcıya özgü biçimde sohbet geçmişi.
-            tools: `tools.schema` ile üretilmiş sağlayıcıya uygun araç tanımları.
+            system: The system instruction.
+            messages: The chat history in the provider-specific format.
+            tools: Provider-appropriate tool definitions produced by `tools.schema`.
         """
         raise NotImplementedError
 
@@ -64,7 +64,7 @@ class Provider(abc.ABC):
     def append_assistant(
         self, messages: list[dict[str, Any]], turn: AssistantTurn
     ) -> None:
-        """Modelin yanıtını geçmişe ekler (sağlayıcıya özgü biçimde)."""
+        """Appends the model's response to the history (in the provider-specific format)."""
 
     @abc.abstractmethod
     def append_tool_results(
@@ -72,9 +72,9 @@ class Provider(abc.ABC):
         messages: list[dict[str, Any]],
         results: list[tuple[ToolCall, str]],
     ) -> None:
-        """Araç sonuçlarını geçmişe ekler."""
+        """Appends tool results to the history."""
 
     @staticmethod
     @abc.abstractmethod
     def format_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Ortak araç şemasını sağlayıcının beklediği biçime çevirir."""
+        """Converts the common tool schema to the format the provider expects."""
